@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: remediation-bot
+  namespace: monitoring
+  labels:
+    app: remediation-bot
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: remediation-bot-role
+  labels:
+    app: remediation-bot
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: remediation-bot-binding
+  labels:
+    app: remediation-bot
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: remediation-bot-role
+subjects:
+  - kind: ServiceAccount
+    name: remediation-bot
+    namespace: monitoring
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: remediation-bot
+  namespace: monitoring
+  labels:
+    app: remediation-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: remediation-bot
+  template:
+    metadata:
+      labels:
+        app: remediation-bot
+    spec:
+      serviceAccountName: remediation-bot
+      containers:
+        - name: remediation-bot
+          image: self-healing-eks-bot:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 9000
+              name: webhook
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: remediation-bot-service
+  namespace: monitoring
+  labels:
+    app: remediation-bot
+spec:
+  selector:
+    app: remediation-bot
+  ports:
+    - name: webhook
+      port: 9000
+      targetPort: 9000
+  type: ClusterIP
