@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app-service
+  namespace: app
+  labels:
+    app: demo-app
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: demo-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+  type: ClusterIP
