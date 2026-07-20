@@ -1,0 +1,97 @@
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    retentionSize: "5GB"
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+    resources:
+      requests:
+        cpu: 200m
+        memory: 400Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    ruleSelectorNilUsesHelmValues: false
+    ruleSelector: {}
+    ruleNamespaceSelector: {}
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ['namespace', 'alertname']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: 'remediation-webhook'
+      routes:
+        - match:
+            severity: critical
+          group_wait: 10s
+          receiver: 'remediation-webhook'
+        - match:
+            alertname: Watchdog
+          receiver: 'null'
+    receivers:
+      - name: 'null'
+      - name: 'remediation-webhook'
+        webhook_configs:
+          - url: 'http://remediation-bot-service.monitoring.svc.cluster.local:9000/webhook'
+            send_resolved: true
+            http_config:
+              timeout: 10s
+    inhibit_rules:
+      - source_match:
+          alertname: NodeNotReady
+        target_match_re:
+          alertname: "KubePod.*"
+        equal: ['node']
+
+nodeExporter:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 64Mi
+
+kubeStateMetrics:
+  enabled: true
+
+grafana:
+  enabled: true
+  adminUser: admin
+  adminPassword: "grafana-admin-pass"
+  service:
+    type: NodePort
+    nodePort: 32000
+  persistence:
+    enabled: false
+  sidecar:
+    dashboards:
+      enabled: true
+    datasources:
+      enabled: true
+  grafana.ini:
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false

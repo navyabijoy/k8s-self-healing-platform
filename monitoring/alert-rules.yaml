@@ -1,0 +1,199 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: self-healing-eks-alerts
+  namespace: monitoring
+  labels:
+    app: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: pod-health
+      interval: 30s
+      rules:
+        - alert: KubePodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{
+              namespace="app",
+              job="kube-state-metrics"
+            }[10m]) * 60 > 0.5
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+            remediation: restart_pod
+          annotations:
+            summary: "Pod {{ $labels.pod }} is crash-looping"
+            description: |
+              {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) restart rate is {{ $value | humanize }} /min.
+            runbook_url: "https://github.com/your-username/self-healing-eks/blob/main/docs/runbooks/pod-crash-loop.md"
+
+        - alert: PodOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{
+              reason="OOMKilled",
+              namespace="app"
+            } == 1
+          for: 0m
+          labels:
+            severity: critical
+            team: platform
+            remediation: increase_memory
+          annotations:
+            summary: "Pod {{ $labels.pod }} was OOMKilled"
+            description: |
+              {{ $labels.namespace }}/{{ $labels.pod }} exceeded its memory limit.
+            runbook_url: "https://github.com/your-username/self-healing-eks/blob/main/docs/runbooks/pod-crash-loop.md"
+
+        - alert: PodStuckPending
+          expr: |
+            kube_pod_status_phase{
+              phase="Pending",
+              namespace="app"
+            } == 1
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.pod }} pending for > 5m"
+            description: |
+              {{ $labels.namespace }}/{{ $labels.pod }} cannot be scheduled.
+
+    - name: resource-utilization
+      interval: 60s
+      rules:
+        - alert: HighCPUUtilization
+          expr: |
+            (
+              sum(rate(container_cpu_usage_seconds_total{
+                namespace="app",
+                container="demo-app"
+              }[5m])) by (pod)
+              /
+              sum(kube_pod_container_resource_limits{
+                namespace="app",
+                container="demo-app",
+                resource="cpu"
+              }) by (pod)
+            ) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+            remediation: scale_up
+          annotations:
+            summary: "High CPU in pod {{ $labels.pod }}"
+            description: |
+              {{ $labels.pod }} CPU at {{ $value | humanizePercentage }} of limit for 5m.
+            runbook_url: "https://github.com/your-username/self-healing-eks/blob/main/docs/runbooks/high-cpu.md"
+
+        - alert: HighMemoryUtilization
+          expr: |
+            (
+              sum(container_memory_working_set_bytes{
+                namespace="app",
+                container="demo-app"
+              }) by (pod)
+              /
+              sum(kube_pod_container_resource_limits{
+                namespace="app",
+                container="demo-app",
+                resource="memory"
+              }) by (pod)
+            ) * 100 > 85
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+            remediation: increase_memory
+          annotations:
+            summary: "High memory in pod {{ $labels.pod }}"
+            description: |
+              {{ $labels.pod }} memory at {{ $value | humanizePercentage }} of limit.
+
+        - alert: NodeHighCPU
+          expr: |
+            (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) by (node)) * 100 > 85
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Node {{ $labels.node }} CPU > 85%"
+            description: |
+              {{ $labels.node }} has been above 85% CPU for 10m.
+
+    - name: latency
+      interval: 30s
+      rules:
+        - alert: HighLatency
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(app_request_duration_seconds_bucket{
+                namespace="app"
+              }[5m])) by (le, path, pod)
+            ) > 2.0
+          for: 3m
+          labels:
+            severity: warning
+            team: platform
+            remediation: scale_up
+          annotations:
+            summary: "p99 latency > 2s on {{ $labels.path }}"
+            description: |
+              99th percentile latency on {{ $labels.path }} (pod {{ $labels.pod }}): {{ $value | humanizeDuration }}.
+            runbook_url: "https://github.com/your-username/self-healing-eks/blob/main/docs/runbooks/latency-spike.md"
+
+        - alert: HighErrorRate
+          expr: |
+            (
+              sum(rate(app_requests_total{status=~"5.."}[5m])) by (path)
+              /
+              sum(rate(app_requests_total[5m])) by (path)
+            ) * 100 > 5
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Error rate > 5% on {{ $labels.path }}"
+            description: |
+              {{ $value | humanize }}% of requests to {{ $labels.path }} returning 5xx.
+
+    - name: cluster-health
+      interval: 60s
+      rules:
+        - alert: NodeNotReady
+          expr: |
+            kube_node_status_condition{
+              condition="Ready",
+              status="true"
+            } == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+            remediation: cordon_node
+          annotations:
+            summary: "Node {{ $labels.node }} NotReady"
+            description: |
+              {{ $labels.node }} has been NotReady for 2m.
+
+        - alert: DeploymentReplicasMismatch
+          expr: |
+            (
+              kube_deployment_spec_replicas{namespace="app"}
+              !=
+              kube_deployment_status_replicas_available{namespace="app"}
+            ) and (
+              changes(kube_deployment_status_replicas_updated{namespace="app"}[5m]) == 0
+            )
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Replica mismatch in {{ $labels.deployment }}"
+            description: |
+              {{ $labels.namespace }}/{{ $labels.deployment }} desired vs available mismatch stable for 10m.
