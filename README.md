@@ -1,6 +1,6 @@
 # Self-Healing EKS Cluster with Full Observability
 
-> A production-grade DevOps portfolio project demonstrating Infrastructure as Code,
+> A production-grade project demonstrating Infrastructure as Code,
 > Kubernetes, automated monitoring, and self-healing automation — running for **$0** on minikube.
 
 ---
@@ -34,7 +34,7 @@
 │  │  postgres (1 pod)   │         └──────────────────────────────┘   │
 │  └─────────────────────┘                                            │
 │                                                                     │
-│  Ingress (nginx) ─── routes app.local → demo-app                   │
+│  Ingress (nginx) ─── routes app.local → demo-app                    │
 │  HPA ────────────── auto-scales 2→10 replicas on CPU/memory         │
 └─────────────────────────────────────────────────────────────────────┘
 
